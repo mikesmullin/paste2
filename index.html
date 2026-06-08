@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paste &rarr; Markdown / Jira / Slack</title>
+<style>
+  :root {
+    --bg: #1e1f26;
+    --panel: #2a2c36;
+    --panel-2: #32343f;
+    --border: #3d404d;
+    --text: #e6e7ea;
+    --muted: #9aa0ad;
+    --accent: #6c8cff;
+    --accent-2: #4f6fe0;
+    --good: #3fb27f;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header {
+    padding: 14px 20px 0;
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tab {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    padding: 8px 16px;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all .12s ease;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    background: var(--panel-2);
+    color: var(--text);
+    border-color: var(--accent);
+    border-bottom-color: var(--panel-2);
+  }
+  main {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 14px 20px 8px;
+    min-height: 0;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 120px;
+  }
+  #colLeft { flex: 0 0 var(--split, 50%); }
+  #colRight { flex: 1 1 auto; }
+  .resizer {
+    flex: 0 0 14px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: col-resize;
+    color: var(--muted);
+    user-select: none;
+    touch-action: none;
+  }
+  .resizer:hover, .resizer.dragging { color: var(--accent); }
+  .resizer .grip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 38px;
+    border-radius: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+  }
+  .resizer:hover .grip, .resizer.dragging .grip { border-color: var(--accent); }
+  .resizer svg { width: 14px; height: 14px; display: block; }
+  body.resizing { cursor: col-resize; user-select: none; }
+  .col-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .col-head label {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  #paste {
+    flex: 1;
+    border: 1px dashed var(--border);
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 14px;
+    overflow: auto;
+    outline: none;
+    min-height: 240px;
+    line-height: 1.5;
+  }
+  #paste:focus { border-color: var(--accent); }
+  #paste.empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted);
+    pointer-events: none;
+  }
+  #paste img { max-width: 100%; }
+  #output {
+    flex: 1;
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    min-height: 240px;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 2;
+  }
+  #output:focus { border-color: var(--accent); }
+  #mdInput {
+    flex: 1;
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    min-height: 240px;
+    tab-size: 2;
+  }
+  #mdInput:focus { border-color: var(--accent); }
+  #preview {
+    flex: 1;
+    border: 1px solid var(--border);
+    background: #23252e;
+    color: #d7dae0;
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow: auto;
+    outline: none;
+    min-height: 240px;
+    line-height: 1.55;
+  }
+  #preview > :first-child { margin-top: 0; }
+  #preview > :last-child { margin-bottom: 0; }
+  #preview h1, #preview h2, #preview h3,
+  #preview h4, #preview h5, #preview h6 {
+    line-height: 1.25; margin: 1.2em 0 .5em; font-weight: 600; color: #f0f1f4;
+  }
+  #preview h1 { font-size: 1.7em; }
+  #preview h2 { font-size: 1.4em; }
+  #preview h3 { font-size: 1.2em; }
+  #preview p { margin: .6em 0; }
+  #preview a { color: #7aa2ff; }
+  #preview code {
+    font-family: var(--mono); font-size: .88em;
+    background: #2f323d; padding: .1em .35em; border-radius: 4px; color: #e6c07b;
+  }
+  #preview pre {
+    background: #1b1d24; border: 1px solid #353845;
+    border-radius: 8px; padding: 12px; overflow: auto;
+  }
+  #preview pre code { background: none; padding: 0; color: #d7dae0; }
+  #preview blockquote {
+    margin: .6em 0; padding: .2em .9em;
+    border-left: 3px solid #4a4f5e; color: #a6acb8;
+  }
+  #preview ul, #preview ol { margin: .5em 0; padding-left: 1.6em; }
+  #preview li { margin: .2em 0; }
+  #preview hr { border: none; border-top: 1px solid #3d404d; margin: 1.2em 0; }
+  #preview table { border-collapse: collapse; margin: .7em 0; }
+  #preview th, #preview td { border: 1px solid #3d404d; padding: 6px 10px; }
+  #preview th { background: #2f323d; }
+  #preview img { max-width: 100%; }
+  .hidden { display: none !important; }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all .12s ease;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent-2); border-color: var(--accent-2); }
+  .btn.primary:hover { background: var(--accent); }
+  .btn.copied { background: var(--good); border-color: var(--good); }
+  .actions { display: flex; gap: 8px; }
+  #copy { display: inline-flex; align-items: center; }
+  .btn .icon { display: inline-flex; vertical-align: middle; margin-right: 6px; }
+  .btn .icon svg { width: 16px; height: 16px; }
+  footer {
+    padding: 6px 20px 14px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  kbd {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  @media (max-width: 760px) {
+    main { flex-direction: column; }
+    #colLeft { flex: 1 1 auto; }
+    .resizer { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Paste &rarr; Markup Converter</h1>
+  <div class="sub" id="sub">Copy rich text anywhere, then paste it below (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>). Pick an output flavor.</div>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-mode="markdown">Markdown</button>
+    <button class="tab" data-mode="jira">Jira Markup</button>
+    <button class="tab" data-mode="slack">Slack mrkdwn</button>
+    <button class="tab" data-mode="rich">Markdown &rarr; Rich Text</button>
+  </div>
+</header>
+
+<main>
+  <div class="col" id="colLeft">
+    <div class="col-head">
+      <label id="leftLabel">Paste here</label>
+      <div class="actions">
+        <button class="btn" id="clear">Clear</button>
+      </div>
+    </div>
+    <div id="paste" class="empty" contenteditable="true" data-placeholder="Paste rich text or HTML here…"></div>
+    <textarea id="mdInput" class="hidden" spellcheck="false" placeholder="# Type or paste Markdown here…"></textarea>
+  </div>
+  <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize columns (double-click to reset)">
+    <span class="grip" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M92,60A16,16,0,1,1,76,44,16,16,0,0,1,92,60Zm88,16a16,16,0,1,0-16-16A16,16,0,0,0,180,76ZM76,112a16,16,0,1,0,16,16A16,16,0,0,0,76,112Zm104,0a16,16,0,1,0,16,16A16,16,0,0,0,180,112ZM76,180a16,16,0,1,0,16,16A16,16,0,0,0,76,180Zm104,0a16,16,0,1,0,16,16A16,16,0,0,0,180,180Z"></path></svg></span>
+  </div>
+  <div class="col" id="colRight">
+    <div class="col-head">
+      <label id="outLabel">Markdown output</label>
+      <div class="actions">
+        <button class="btn primary" id="copy">
+          <span class="icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M200,32H163.74a47.92,47.92,0,0,0-71.48,0H56A16,16,0,0,0,40,48V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V48A16,16,0,0,0,200,32Zm-72,0a32,32,0,0,1,32,32H96A32,32,0,0,1,128,32Zm72,184H56V48H82.75A47.93,47.93,0,0,0,80,64v8a8,8,0,0,0,8,8h80a8,8,0,0,0,8-8V64a47.93,47.93,0,0,0-2.75-16H200Z"></path></svg></span>
+          <span class="btn-label">Copy</span>
+        </button>
+      </div>
+    </div>
+    <textarea id="output" spellcheck="false" placeholder="Converted output appears here…"></textarea>
+    <div id="preview" class="hidden"></div>
+  </div>
+</main>
+
+<footer id="status">Ready. Runs 100% locally — safe to bookmark this <code>file://</code> page.</footer>
+
+<script>
+"use strict";
+(function () {
+  // ------------------------------------------------------------------
+  // Flavor definitions
+  // ------------------------------------------------------------------
+  const FLAVORS = {
+    markdown: {
+      label: "Markdown output",
+      bold: t => `**${t}**`,
+      italic: t => `*${t}*`,
+      strike: t => `~~${t}~~`,
+      codeInline: t => "`" + t + "`",
+      codeBlock: (t, lang) => "```" + (lang || "") + "\n" + t + "\n```",
+      heading: (t, lvl) => "#".repeat(Math.min(lvl, 6)) + " " + t,
+      link: (text, href) => (!text || text === href) ? `<${href}>` : `[${text}](${href})`,
+      image: (alt, src) => `![${alt || ""}](${src})`,
+      bulletMarker: () => "- ",
+      orderedMarker: (i) => `${i}. `,
+      indent: (depth) => "  ".repeat(depth),
+      blockquote: line => "> " + line,
+      hr: "---",
+      tables: true,
+    },
+    jira: {
+      label: "Jira markup output",
+      bold: t => `*${t}*`,
+      italic: t => `_${t}_`,
+      strike: t => `-${t}-`,
+      codeInline: t => `{{${t}}}`,
+      codeBlock: (t, lang) => `{code${lang ? ":" + lang : ""}}\n${t}\n{code}`,
+      heading: (t, lvl) => `h${Math.min(lvl, 6)}. ${t}`,
+      link: (text, href) => (!text || text === href) ? `[${href}]` : `[${text}|${href}]`,
+      image: (alt, src) => `!${src}!`,
+      // Jira encodes nesting via repeated markers, not indentation.
+      bulletMarker: (i, depth) => "*".repeat(depth + 1) + " ",
+      orderedMarker: (i, depth) => "#".repeat(depth + 1) + " ",
+      indent: () => "",
+      blockquote: line => "bq. " + line,
+      hr: "----",
+      tables: true,
+      jiraTables: true,
+    },
+    slack: {
+      label: "Slack mrkdwn output",
+      bold: t => `*${t}*`,
+      italic: t => `_${t}_`,
+      strike: t => `~${t}~`,
+      codeInline: t => "`" + t + "`",
+      codeBlock: (t) => "```\n" + t + "\n```",
+      heading: (t) => `*${t}*`, // Slack mrkdwn has no headings → bold
+      link: (text, href) => (!text || text === href) ? `<${href}>` : `<${href}|${text}>`,
+      image: (alt, src) => `<${src}|${alt || src}>`,
+      bulletMarker: () => "• ",
+      orderedMarker: (i) => `${i}. `,
+      indent: (depth) => "    ".repeat(depth),
+      blockquote: line => "> " + line,
+      hr: "────────",
+      tables: false, // Slack has no table markup → render as plain text rows
+    },
+  };
+
+  let mode = "markdown";
+
+  // ------------------------------------------------------------------
+  // Helpers
+  // ------------------------------------------------------------------
+  const INLINE_TAGS = new Set(["A","B","STRONG","I","EM","U","S","STRIKE","DEL","CODE","SPAN","SUP","SUB","MARK","FONT","SMALL","BR","IMG","Q","ABBR","CITE","KBD","SAMP","VAR","TIME"]);
+
+  function isHidden(el) {
+    const st = el.getAttribute && el.getAttribute("style");
+    if (st && /display\s*:\s*none|visibility\s*:\s*hidden/i.test(st)) return true;
+    return false;
+  }
+
+  function collapseWs(s) {
+    return s.replace(/\s+/g, " ");
+  }
+
+  function escapeForFlavor(text) {
+    if (mode === "markdown") {
+      // Minimal escaping: only characters likely to break inline formatting.
+      // Avoids ugly over-escaping of '.', '-', '#', etc. in ordinary prose.
+      return text.replace(/([\\`*_])/g, "\\$1");
+    }
+    return text; // Jira/Slack: leave literal text mostly intact
+  }
+
+  // ------------------------------------------------------------------
+  // Inline conversion (returns a string)
+  // ------------------------------------------------------------------
+  function convertInline(node, f) {
+    let out = "";
+    node.childNodes.forEach(child => {
+      out += inlineNode(child, f);
+    });
+    return out;
+  }
+
+  function inlineNode(node, f) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeForFlavor(collapseWs(node.nodeValue));
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    if (isHidden(node)) return "";
+
+    const tag = node.tagName;
+
+    switch (tag) {
+      case "BR":
+        return "\n";
+      case "IMG": {
+        const src = node.getAttribute("src") || "";
+        if (!src || src.startsWith("data:")) return ""; // skip embedded blobs
+        return f.image(node.getAttribute("alt") || "", src);
+      }
+      case "A": {
+        const href = node.getAttribute("href") || "";
+        const text = convertInline(node, f).trim();
+        if (!href || href.startsWith("javascript:")) return text;
+        return f.link(text, href);
+      }
+      case "STRONG": case "B": {
+        const t = convertInline(node, f);
+        return t.trim() ? f.bold(t) : t;
+      }
+      case "EM": case "I": case "CITE": case "VAR": {
+        const t = convertInline(node, f);
+        return t.trim() ? f.italic(t) : t;
+      }
+      case "S": case "STRIKE": case "DEL": {
+        const t = convertInline(node, f);
+        return t.trim() ? f.strike(t) : t;
+      }
+      case "CODE": case "KBD": case "SAMP": case "TT": {
+        const t = node.textContent;
+        return t ? f.codeInline(t) : "";
+      }
+      default:
+        return convertInline(node, f);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Block conversion (returns array of lines / blocks)
+  // ------------------------------------------------------------------
+  function convertBlocks(node, f, listCtx) {
+    const blocks = [];
+    node.childNodes.forEach(child => {
+      blockNode(child, f, blocks, listCtx);
+    });
+    return blocks;
+  }
+
+  function pushText(blocks, text) {
+    if (text && text.trim()) blocks.push(text);
+  }
+
+  function blockNode(node, f, blocks, listCtx) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = collapseWs(node.nodeValue);
+      if (t.trim()) blocks.push(escapeForFlavor(t).trim());
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (isHidden(node)) return;
+
+    const tag = node.tagName;
+
+    // Inline element sitting at block level → treat the run as a paragraph.
+    if (INLINE_TAGS.has(tag)) {
+      pushText(blocks, inlineNode(node, f).trim());
+      return;
+    }
+
+    switch (tag) {
+      case "H1": case "H2": case "H3": case "H4": case "H5": case "H6": {
+        const lvl = parseInt(tag[1], 10);
+        const txt = convertInline(node, f).trim();
+        if (txt) blocks.push(f.heading(txt, lvl));
+        return;
+      }
+      case "P":
+      case "DIV":
+      case "SECTION": case "ARTICLE": case "HEADER": case "FOOTER":
+      case "MAIN": case "ASIDE": case "FIGURE": case "FIGCAPTION":
+      case "DD": case "DT": case "DL": case "ADDRESS": {
+        // If it contains block-level children, recurse; otherwise flatten inline.
+        if (hasBlockChild(node)) {
+          convertBlocks(node, f, listCtx).forEach(b => blocks.push(b));
+        } else {
+          const line = inlineNode(node, f).trim();
+          pushText(blocks, line);
+        }
+        return;
+      }
+      case "BLOCKQUOTE": {
+        const inner = convertBlocks(node, f, listCtx);
+        const text = inner.join("\n\n");
+        text.split("\n").forEach(line => {
+          blocks.push(f.blockquote(line));
+        });
+        return;
+      }
+      case "PRE": {
+        let codeEl = node.querySelector("code");
+        let lang = "";
+        if (codeEl) {
+          const cls = codeEl.getAttribute("class") || "";
+          const m = cls.match(/language-([\w+-]+)/i) || cls.match(/lang-([\w+-]+)/i);
+          if (m) lang = m[1];
+        }
+        const code = (codeEl ? codeEl.textContent : node.textContent).replace(/\n$/, "");
+        blocks.push(f.codeBlock(code, lang));
+        return;
+      }
+      case "UL": case "OL": {
+        const lines = convertList(node, f, {
+          ordered: tag === "OL",
+          depth: listCtx ? listCtx.depth : 0,
+        });
+        blocks.push(lines.join("\n"));
+        return;
+      }
+      case "HR": {
+        blocks.push(f.hr);
+        return;
+      }
+      case "TABLE": {
+        blocks.push(convertTable(node, f));
+        return;
+      }
+      case "BR":
+        return;
+      default: {
+        // Unknown wrapper: recurse.
+        convertBlocks(node, f, listCtx).forEach(b => blocks.push(b));
+        return;
+      }
+    }
+  }
+
+  function hasBlockChild(node) {
+    for (const c of node.children) {
+      if (!INLINE_TAGS.has(c.tagName)) return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------------
+  // Lists (with nesting)
+  // ------------------------------------------------------------------
+  function convertList(listEl, f, ctx) {
+    const lines = [];
+    let index = 1;
+    Array.from(listEl.children).forEach(li => {
+      if (li.tagName !== "LI") return;
+
+      // Separate nested lists from the item's own inline/block content.
+      const nestedLists = [];
+      const contentNodes = [];
+      li.childNodes.forEach(c => {
+        if (c.nodeType === Node.ELEMENT_NODE && (c.tagName === "UL" || c.tagName === "OL")) {
+          nestedLists.push(c);
+        } else {
+          contentNodes.push(c);
+        }
+      });
+
+      // Build the item text from the non-list content.
+      const frag = document.createElement("div");
+      contentNodes.forEach(c => frag.appendChild(c.cloneNode(true)));
+      let itemText;
+      if (hasBlockChild(frag)) {
+        itemText = convertBlocks(frag, f, ctx).join(" ").trim();
+      } else {
+        itemText = inlineNode(frag, f).replace(/\n+/g, " ").trim();
+      }
+
+      const marker = ctx.ordered
+        ? f.orderedMarker(index, ctx.depth)
+        : f.bulletMarker(index, ctx.depth);
+      const indent = f.indent(ctx.depth);
+      if (itemText) lines.push(indent + marker + itemText);
+
+      // Render nested lists below.
+      nestedLists.forEach(nl => {
+        const childLines = convertList(nl, f, {
+          ordered: nl.tagName === "OL",
+          depth: ctx.depth + 1,
+        });
+        childLines.forEach(l => lines.push(l));
+      });
+
+      index++;
+    });
+    return lines;
+  }
+
+  // ------------------------------------------------------------------
+  // Tables
+  // ------------------------------------------------------------------
+  function getRows(table) {
+    const rows = [];
+    table.querySelectorAll("tr").forEach(tr => {
+      const cells = [];
+      tr.querySelectorAll("th,td").forEach(cell => {
+        cells.push({
+          text: inlineNode(cell, FLAVORS[mode]).replace(/\n+/g, " ").trim(),
+          header: cell.tagName === "TH",
+        });
+      });
+      if (cells.length) rows.push(cells);
+    });
+    return rows;
+  }
+
+  function convertTable(table, f) {
+    const rows = getRows(table);
+    if (!rows.length) return "";
+
+    if (mode === "slack") {
+      // No table markup in Slack — emit tab-separated rows in a code block.
+      const lines = rows.map(r => r.map(c => c.text).join("\t"));
+      return "```\n" + lines.join("\n") + "\n```";
+    }
+
+    if (f.jiraTables) {
+      return rows.map((r, ri) => {
+        const isHeader = r.some(c => c.header) || (ri === 0 && rows.length > 1);
+        if (isHeader) {
+          return "||" + r.map(c => c.text).join("||") + "||";
+        }
+        return "|" + r.map(c => c.text || " ").join("|") + "|";
+      }).join("\n");
+    }
+
+    // Markdown table
+    const colCount = Math.max(...rows.map(r => r.length));
+    const headerRowIdx = rows.findIndex(r => r.some(c => c.header));
+    let header, bodyStart;
+    if (headerRowIdx === 0) {
+      header = rows[0];
+      bodyStart = 1;
+    } else {
+      header = Array.from({ length: colCount }, () => ({ text: " " }));
+      bodyStart = 0;
+    }
+    const fill = (r) => {
+      const cells = r.map(c => c.text || " ");
+      while (cells.length < colCount) cells.push(" ");
+      return "| " + cells.join(" | ") + " |";
+    };
+    const out = [];
+    out.push(fill(header));
+    out.push("| " + Array.from({ length: colCount }, () => "---").join(" | ") + " |");
+    for (let i = bodyStart; i < rows.length; i++) out.push(fill(rows[i]));
+    return out.join("\n");
+  }
+
+  // ------------------------------------------------------------------
+  // Top-level: HTML string → flavored text
+  // ------------------------------------------------------------------
+  function htmlToText(html) {
+    const f = FLAVORS[mode];
+    const doc = document.createElement("div");
+    doc.innerHTML = html;
+
+    // Strip script/style noise.
+    doc.querySelectorAll("script,style,noscript,head,title,meta,link").forEach(n => n.remove());
+
+    const blocks = convertBlocks(doc, f, { depth: 0 });
+    return blocks.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function plainToText(text) {
+    // Best-effort when only plain text is on the clipboard.
+    return text.replace(/\r\n/g, "\n").trim();
+  }
+
+  // ------------------------------------------------------------------
+  // Markdown → HTML (for the "Markdown → Rich Text" mode)
+  // ------------------------------------------------------------------
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function escapeAttr(s) {
+    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  }
+
+  function inlineMd(text) {
+    // Protect inline code spans so their contents aren't reformatted.
+    const codes = [];
+    let s = text.replace(/`([^`]+)`/g, (m, c) => {
+      codes.push(c);
+      return "\u0000" + (codes.length - 1) + "\u0000";
+    });
+    s = escapeHtml(s);
+    // Images: ![alt](url "title")
+    s = s.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/g,
+      (m, alt, url, title) =>
+        `<img src="${escapeAttr(url)}" alt="${escapeAttr(alt)}"${title ? ` title="${escapeAttr(title)}"` : ""}>`);
+    // Links: [text](url "title")
+    s = s.replace(/\[([^\]]+)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/g,
+      (m, txt, url, title) =>
+        `<a href="${escapeAttr(url)}"${title ? ` title="${escapeAttr(title)}"` : ""}>${txt}</a>`);
+    // Autolinks: <https://…>
+    s = s.replace(/&lt;(https?:\/\/[^\s&]+)&gt;/g, '<a href="$1">$1</a>');
+    // Bold
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    // Strikethrough
+    s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    // Italic (after bold so leftover single markers remain)
+    s = s.replace(/\*(?!\s)([^*]+?)\*/g, "<em>$1</em>");
+    s = s.replace(/(^|[^\w])_(?!_)([^_]+?)_(?!\w)/g, "$1<em>$2</em>");
+    // Restore code spans
+    s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => "<code>" + escapeHtml(codes[i]) + "</code>");
+    return s;
+  }
+
+  function indentOf(line) {
+    const m = line.match(/^(\s*)/);
+    return m ? m[1].length : 0;
+  }
+
+  function splitRow(line) {
+    const s = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return s.split(/(?<!\\)\|/).map(c => c.replace(/\\\|/g, "|").trim());
+  }
+
+  function isTableSep(line) {
+    return /-/.test(line) &&
+      /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(line);
+  }
+
+  function parseTable(lines, start) {
+    const header = splitRow(lines[start]);
+    const aligns = splitRow(lines[start + 1]).map(c => {
+      const l = c.startsWith(":"), r = c.endsWith(":");
+      return l && r ? "center" : r ? "right" : l ? "left" : "";
+    });
+    let i = start + 2;
+    const rows = [];
+    while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== "" && !isTableSep(lines[i])) {
+      rows.push(splitRow(lines[i]));
+      i++;
+    }
+    const cols = header.length;
+    let html = "<table><thead><tr>";
+    header.forEach((c, idx) => {
+      const a = aligns[idx] ? ` style="text-align:${aligns[idx]}"` : "";
+      html += `<th${a}>` + inlineMd(c) + "</th>";
+    });
+    html += "</tr></thead><tbody>";
+    rows.forEach(r => {
+      html += "<tr>";
+      for (let idx = 0; idx < cols; idx++) {
+        const a = aligns[idx] ? ` style="text-align:${aligns[idx]}"` : "";
+        html += `<td${a}>` + inlineMd(r[idx] || "") + "</td>";
+      }
+      html += "</tr>";
+    });
+    html += "</tbody></table>";
+    return [html, i - start];
+  }
+
+  function parseList(lines, start) {
+    const baseIndent = indentOf(lines[start]);
+    const ordered = /^\s*\d+[.)]\s+/.test(lines[start]);
+    let html = ordered ? "<ol>" : "<ul>";
+    let i = start;
+    while (i < lines.length) {
+      if (lines[i].trim() === "") {
+        const next = lines[i + 1];
+        if (next && /^\s*([-*+]|\d+[.)])\s+/.test(next) &&
+            indentOf(next) >= baseIndent &&
+            /^\s*\d+[.)]\s+/.test(next) === ordered) {
+          i++;
+          continue;
+        }
+        break;
+      }
+      const ind = indentOf(lines[i]);
+      const m = lines[i].match(/^\s*([-*+]|\d+[.)])\s+(.*)$/);
+      if (!m || ind < baseIndent) break;
+      if (ind > baseIndent) break; // deeper level handled recursively below
+      if (/^\s*\d+[.)]\s+/.test(lines[i]) !== ordered) break; // marker type switched
+      let itemText = m[2];
+      i++;
+      let nested = "";
+      while (i < lines.length && lines[i].trim() !== "" && indentOf(lines[i]) > baseIndent) {
+        if (/^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) {
+          const [nh, consumed] = parseList(lines, i);
+          nested += nh;
+          i += consumed;
+        } else {
+          itemText += " " + lines[i].trim();
+          i++;
+        }
+      }
+      html += "<li>" + inlineMd(itemText.trim()) + nested + "</li>";
+    }
+    html += ordered ? "</ol>" : "</ul>";
+    return [html, i - start];
+  }
+
+  function markdownToHtml(md) {
+    const lines = md.replace(/\r\n/g, "\n").replace(/\t/g, "    ").split("\n");
+    let html = "";
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (line.trim() === "") { i++; continue; }
+
+      // Fenced code block
+      const fence = line.match(/^\s*(```|~~~)(.*)$/);
+      if (fence) {
+        const marker = fence[1];
+        const lang = (fence[2].trim().match(/^[\w+-]+/) || [""])[0];
+        const buf = [];
+        i++;
+        while (i < lines.length && lines[i].trim() !== marker) { buf.push(lines[i]); i++; }
+        i++; // skip closing fence
+        html += "<pre><code" + (lang ? ` class="language-${escapeAttr(lang)}"` : "") + ">" +
+          escapeHtml(buf.join("\n")) + "</code></pre>";
+        continue;
+      }
+
+      // Heading
+      const h = line.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+      if (h) {
+        const lvl = h[1].length;
+        html += `<h${lvl}>` + inlineMd(h[2].trim()) + `</h${lvl}>`;
+        i++; continue;
+      }
+
+      // Horizontal rule
+      if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) { html += "<hr>"; i++; continue; }
+
+      // Blockquote
+      if (/^\s*>/.test(line)) {
+        const buf = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) {
+          buf.push(lines[i].replace(/^\s*>\s?/, ""));
+          i++;
+        }
+        html += "<blockquote>" + markdownToHtml(buf.join("\n")) + "</blockquote>";
+        continue;
+      }
+
+      // Table
+      if (/\|/.test(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        const [t, consumed] = parseTable(lines, i);
+        html += t; i += consumed; continue;
+      }
+
+      // List
+      if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
+        const [l, consumed] = parseList(lines, i);
+        html += l; i += consumed; continue;
+      }
+
+      // Paragraph
+      const buf = [];
+      while (i < lines.length && lines[i].trim() !== "" &&
+             !/^\s*(```|~~~)/.test(lines[i]) &&
+             !/^\s*#{1,6}\s+/.test(lines[i]) &&
+             !/^\s*>/.test(lines[i]) &&
+             !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i]) &&
+             !/^\s*([-*_])\s*(\1\s*){2,}$/.test(lines[i]) &&
+             !(/\|/.test(lines[i]) && i + 1 < lines.length && isTableSep(lines[i + 1]))) {
+        buf.push(lines[i]); i++;
+      }
+      let para = "";
+      for (let k = 0; k < buf.length; k++) {
+        const hard = /(\s{2,}|\\)$/.test(buf[k]);
+        para += inlineMd(buf[k].trim());
+        if (k < buf.length - 1) para += hard ? "<br>" : " ";
+      }
+      html += "<p>" + para + "</p>";
+    }
+    return html;
+  }
+
+  // ------------------------------------------------------------------
+  // UI wiring
+  // ------------------------------------------------------------------
+  const pasteEl = document.getElementById("paste");
+  const outputEl = document.getElementById("output");
+  const mdInput = document.getElementById("mdInput");
+  const previewEl = document.getElementById("preview");
+  const statusEl = document.getElementById("status");
+  const outLabel = document.getElementById("outLabel");
+  const leftLabel = document.getElementById("leftLabel");
+  const subEl = document.getElementById("sub");
+  const tabs = document.getElementById("tabs");
+  const copyBtn = document.getElementById("copy");
+  const copyLabel = copyBtn.querySelector(".btn-label");
+  const clearBtn = document.getElementById("clear");
+  let lastHtml = "";
+  let lastPlain = "";
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+  function isRich() { return mode === "rich"; }
+
+  function render() {
+    const f = FLAVORS[mode];
+    outLabel.textContent = f.label;
+    let result = "";
+    if (lastHtml) result = htmlToText(lastHtml);
+    else if (lastPlain) result = plainToText(lastPlain);
+    outputEl.value = result;
+  }
+
+  function renderRich() {
+    const md = mdInput.value;
+    previewEl.innerHTML = md.trim() ? markdownToHtml(md) : "";
+  }
+
+  function applyLayout() {
+    const rich = isRich();
+    pasteEl.classList.toggle("hidden", rich);
+    mdInput.classList.toggle("hidden", !rich);
+    outputEl.classList.toggle("hidden", rich);
+    previewEl.classList.toggle("hidden", !rich);
+    copyLabel.textContent = rich ? "Copy Rich Text" : "Copy";
+    if (rich) {
+      leftLabel.textContent = "Markdown source";
+      outLabel.textContent = "Rich text preview";
+      subEl.innerHTML = 'Type or paste <strong>Markdown</strong> on the left. Copy the rendered rich text with the button — or select it and press <kbd>&#8984;C</kbd> / <kbd>Ctrl+C</kbd>.';
+      renderRich();
+    } else {
+      leftLabel.textContent = "Paste here";
+      subEl.innerHTML = 'Copy rich text anywhere, then paste it below (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>). Pick an output flavor.';
+      render();
+    }
+  }
+
+  tabs.addEventListener("click", e => {
+    const btn = e.target.closest(".tab");
+    if (!btn) return;
+    mode = btn.dataset.mode;
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === btn));
+    applyLayout();
+    setStatus(isRich()
+      ? "Mode: Markdown → Rich Text."
+      : `Mode: ${FLAVORS[mode].label.replace(" output", "")}.`);
+    (isRich() ? mdInput : pasteEl).focus();
+  });
+
+  pasteEl.addEventListener("paste", e => {
+    e.preventDefault();
+    const cd = e.clipboardData || window.clipboardData;
+    lastHtml = cd.getData("text/html") || "";
+    lastPlain = cd.getData("text/plain") || "";
+
+    // Show a readable preview in the paste pane.
+    if (lastHtml) {
+      pasteEl.innerHTML = lastHtml;
+    } else {
+      pasteEl.textContent = lastPlain;
+    }
+    pasteEl.classList.toggle("empty", !pasteEl.textContent.trim());
+
+    render();
+    setStatus(lastHtml ? "Converted from rich text (HTML)." : "Converted from plain text.");
+  });
+
+  // If the user edits the paste pane manually, re-read it as HTML.
+  pasteEl.addEventListener("input", () => {
+    lastHtml = pasteEl.innerHTML;
+    lastPlain = pasteEl.textContent;
+    pasteEl.classList.toggle("empty", !pasteEl.textContent.trim());
+    render();
+  });
+
+  // Live-render Markdown source into the rich preview.
+  mdInput.addEventListener("input", renderRich);
+
+  clearBtn.addEventListener("click", () => {
+    if (isRich()) {
+      mdInput.value = "";
+      previewEl.innerHTML = "";
+      setStatus("Cleared.");
+      mdInput.focus();
+      return;
+    }
+    lastHtml = "";
+    lastPlain = "";
+    pasteEl.innerHTML = "";
+    pasteEl.classList.add("empty");
+    outputEl.value = "";
+    setStatus("Cleared.");
+    pasteEl.focus();
+  });
+
+  function flashCopied(msg) {
+    copyBtn.classList.add("copied");
+    copyLabel.textContent = "Copied!";
+    setStatus(msg);
+    setTimeout(() => {
+      copyBtn.classList.remove("copied");
+      copyLabel.textContent = isRich() ? "Copy Rich Text" : "Copy";
+    }, 1200);
+  }
+
+  async function copyRich(html, plain) {
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        const item = new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
+        });
+        await navigator.clipboard.write([item]);
+        return true;
+      }
+    } catch (e) { /* fall through to selection-based copy */ }
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(previewEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const ok = document.execCommand("copy");
+      sel.removeAllRanges();
+      return ok;
+    } catch (e) { return false; }
+  }
+
+  copyBtn.addEventListener("click", async () => {
+    if (isRich()) {
+      if (!previewEl.innerHTML.trim()) { setStatus("Nothing to copy yet."); return; }
+      const ok = await copyRich(previewEl.innerHTML, previewEl.innerText);
+      if (ok) flashCopied("Rich text copied to clipboard.");
+      else setStatus("Copy blocked — select the preview and press ⌘C.");
+      return;
+    }
+    const text = outputEl.value;
+    if (!text) { setStatus("Nothing to copy yet."); return; }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        outputEl.select();
+        document.execCommand("copy");
+      }
+      flashCopied("Copied to clipboard.");
+    } catch (err) {
+      // Fallback for file:// where async clipboard may be blocked.
+      outputEl.select();
+      try { document.execCommand("copy"); flashCopied("Copied to clipboard."); }
+      catch (_) { setStatus("Copy blocked — select the text and press ⌘C."); }
+    }
+  });
+
+  // Keyboard: ⌘/Ctrl + Enter copies output.
+  document.addEventListener("keydown", e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      copyBtn.click();
+    }
+  });
+
+  // Column resizer (drag the grip to change the 50/50 split).
+  const mainEl = document.querySelector("main");
+  const resizer = document.getElementById("resizer");
+  let dragging = false;
+
+  function setSplit(pct) {
+    const clamped = Math.max(15, Math.min(85, pct));
+    mainEl.style.setProperty("--split", clamped.toFixed(2) + "%");
+  }
+
+  function pointerToSplit(clientX) {
+    const rect = mainEl.getBoundingClientRect();
+    const styles = getComputedStyle(mainEl);
+    const padL = parseFloat(styles.paddingLeft) || 0;
+    const padR = parseFloat(styles.paddingRight) || 0;
+    const inner = rect.width - padL - padR;
+    if (inner <= 0) return;
+    const x = clientX - rect.left - padL;
+    setSplit((x / inner) * 100);
+  }
+
+  resizer.addEventListener("pointerdown", e => {
+    dragging = true;
+    resizer.classList.add("dragging");
+    document.body.classList.add("resizing");
+    resizer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizer.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    pointerToSplit(e.clientX);
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    try { resizer.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+  resizer.addEventListener("pointerup", endDrag);
+  resizer.addEventListener("pointercancel", endDrag);
+
+  // Double-click resets to an even 50/50 split.
+  resizer.addEventListener("dblclick", () => {
+    mainEl.style.removeProperty("--split");
+  });
+
+  // Keyboard accessibility: arrow keys nudge the split.
+  resizer.addEventListener("keydown", e => {
+    const cur = parseFloat(getComputedStyle(mainEl).getPropertyValue("--split")) || 50;
+    if (e.key === "ArrowLeft") { setSplit(cur - 2); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { setSplit(cur + 2); e.preventDefault(); }
+    else if (e.key === "Home") { mainEl.style.removeProperty("--split"); e.preventDefault(); }
+  });
+
+  applyLayout();
+  pasteEl.focus();
+})();
+</script>
+</body>
+</html>
