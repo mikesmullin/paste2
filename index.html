@@ -122,7 +122,7 @@
     text-transform: uppercase;
     letter-spacing: .04em;
   }
-  #paste {
+  #pasteRich {
     flex: 1;
     border: 1px dashed var(--border);
     background: var(--panel);
@@ -133,13 +133,33 @@
     min-height: 240px;
     line-height: 1.5;
   }
-  #paste:focus { border-color: var(--accent); }
-  #paste.empty::before {
+  #pasteRich:focus { border-color: var(--accent); }
+  #pasteRich.empty::before {
     content: attr(data-placeholder);
     color: var(--muted);
     pointer-events: none;
   }
-  #paste img { max-width: 100%; }
+  #pasteRich img { max-width: 100%; }
+  #paste {
+    flex: 1;
+    width: 100%;
+    border: 1px dashed var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    overflow: auto;
+    outline: none;
+    min-height: 240px;
+    line-height: 1.55;
+    resize: none;
+    white-space: pre-wrap;
+    tab-size: 2;
+  }
+  #paste:focus { border-color: var(--accent); }
+  #paste::placeholder { color: var(--muted); }
   #output {
     flex: 1;
     width: 100%;
@@ -264,12 +284,12 @@
 <body>
 <header>
   <h1>Paste &rarr; Markup Converter</h1>
-  <div class="sub" id="sub">Copy rich text anywhere, then paste it below (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>). Pick an output flavor.</div>
+  <div class="sub" id="sub">Paste or type plain text / Markdown on the left (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>). Pick an output flavor.</div>
   <div class="tabs" id="tabs">
-    <button class="tab active" data-mode="markdown">Markdown</button>
+    <button class="tab active" data-mode="slack">Slack mrkdwn</button>
     <button class="tab" data-mode="jira">Jira Markup</button>
-    <button class="tab" data-mode="slack">Slack mrkdwn</button>
     <button class="tab" data-mode="rich">Markdown &rarr; Rich Text</button>
+    <button class="tab" data-mode="markdown">Rich Text &rarr; Markdown</button>
   </div>
 </header>
 
@@ -281,7 +301,8 @@
         <button class="btn" id="clear">Clear</button>
       </div>
     </div>
-    <div id="paste" class="empty" contenteditable="true" data-placeholder="Paste rich text or HTML here…"></div>
+    <textarea id="paste" spellcheck="false" placeholder="Paste plain text or Markdown here…"></textarea>
+    <div id="pasteRich" class="empty hidden" contenteditable="true" data-placeholder="Paste rich text here…"></div>
     <textarea id="mdInput" class="hidden" spellcheck="false" placeholder="# Type or paste Markdown here…"></textarea>
   </div>
   <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize columns (double-click to reset)">
@@ -366,7 +387,7 @@
     },
   };
 
-  let mode = "markdown";
+  let mode = "slack";
 
   // ------------------------------------------------------------------
   // Helpers
@@ -626,9 +647,26 @@
     if (!rows.length) return "";
 
     if (mode === "slack") {
-      // No table markup in Slack — emit tab-separated rows in a code block.
-      const lines = rows.map(r => r.map(c => c.text).join("\t"));
-      return "```\n" + lines.join("\n") + "\n```";
+      const colCount = Math.max(...rows.map(r => r.length));
+
+      if (colCount === 2) {
+        // 2-column key/value: tab-separated, header row bolded, renders inline in Slack.
+        return rows.map((r, ri) => {
+          const rowIsHeader = r.some(c => c.header) || ri === 0;
+          const key = r[0] ? r[0].text : "";
+          const val = r[1] ? r[1].text : "";
+          if (rowIsHeader) return `*${key}*\t*${val}*`;
+          return `${key}\t${val}`;
+        }).join("\n");
+      }
+
+      // 3+ columns: same approach — bold header row, pipe-separated.
+      return rows.map((r, ri) => {
+        const rowIsHeader = r.some(c => c.header) || ri === 0;
+        const cells = r.map(c => c.text || " ");
+        if (rowIsHeader) return cells.map(t => `*${t}*`).join("  |  ");
+        return cells.join("  |  ");
+      }).join("\n");
     }
 
     if (f.jiraTables) {
@@ -811,8 +849,39 @@
     return [html, i - start];
   }
 
+  function normalizeTableSpacing(md) {
+    // Collapse blank lines between table rows so copy-pasted tables with
+    // extra blank lines between rows are still parsed correctly.
+    // A "table line" is any line that contains a | character (or is a separator).
+    const lines = md.split("\n");
+    const out = [];
+    let inTable = false;
+    for (let i = 0; i < lines.length; i++) {
+      const isTableLine = /\|/.test(lines[i]) || /^\s*:?-+:?(\s*\|\s*:?-+:?)*\s*$/.test(lines[i].trim());
+      if (isTableLine) {
+        inTable = true;
+        out.push(lines[i]);
+      } else if (lines[i].trim() === "" && inTable) {
+        // Peek ahead: if the next non-empty line is also a table line, skip this blank.
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() === "") j++;
+        const nextIsTable = j < lines.length && (/\|/.test(lines[j]) || /^\s*:?-+:?(\s*\|\s*:?-+:?)*\s*$/.test(lines[j].trim()));
+        if (nextIsTable) {
+          // skip the blank line — don't push it
+        } else {
+          inTable = false;
+          out.push(lines[i]);
+        }
+      } else {
+        inTable = false;
+        out.push(lines[i]);
+      }
+    }
+    return out.join("\n");
+  }
+
   function markdownToHtml(md) {
-    const lines = md.replace(/\r\n/g, "\n").replace(/\t/g, "    ").split("\n");
+    const lines = normalizeTableSpacing(md).replace(/\r\n/g, "\n").replace(/\t/g, "    ").split("\n");
     let html = "";
     let i = 0;
     while (i < lines.length) {
@@ -893,7 +962,8 @@
   // ------------------------------------------------------------------
   // UI wiring
   // ------------------------------------------------------------------
-  const pasteEl = document.getElementById("paste");
+  const pasteEl = document.getElementById("paste");       // plain textarea (Jira / Slack)
+  const pasteRichEl = document.getElementById("pasteRich"); // contenteditable div (Markdown)
   const outputEl = document.getElementById("output");
   const mdInput = document.getElementById("mdInput");
   const previewEl = document.getElementById("preview");
@@ -905,19 +975,45 @@
   const copyBtn = document.getElementById("copy");
   const copyLabel = copyBtn.querySelector(".btn-label");
   const clearBtn = document.getElementById("clear");
-  let lastHtml = "";
-  let lastPlain = "";
+  // Per-tab state. Markdown tab stores HTML; others store plain text.
+  const tabState = { markdown: "", jira: "", slack: "", rich: "" };
+
+  function isMarkdown() { return mode === "markdown"; }
+  function isRich()     { return mode === "rich"; }
+
+  function getInput() {
+    if (isRich())     return mdInput.value;
+    if (isMarkdown()) return pasteRichEl.innerHTML;
+    return pasteEl.value;
+  }
+  function saveInput() {
+    tabState[mode] = getInput();
+  }
+  function restoreInput() {
+    if (isRich()) {
+      mdInput.value = tabState[mode];
+    } else if (isMarkdown()) {
+      pasteRichEl.innerHTML = tabState[mode];
+      pasteRichEl.classList.toggle("empty", !pasteRichEl.textContent.trim());
+    } else {
+      pasteEl.value = tabState[mode];
+    }
+  }
 
   function setStatus(msg) { statusEl.textContent = msg; }
-  function isRich() { return mode === "rich"; }
 
   function render() {
-    const f = FLAVORS[mode];
-    outLabel.textContent = f.label;
-    let result = "";
-    if (lastHtml) result = htmlToText(lastHtml);
-    else if (lastPlain) result = plainToText(lastPlain);
-    outputEl.value = result;
+    outLabel.textContent = FLAVORS[mode].label;
+    if (isMarkdown()) {
+      // Markdown tab: convert the rich HTML in the contenteditable div.
+      const html = pasteRichEl.innerHTML;
+      outputEl.value = html && pasteRichEl.textContent.trim() ? htmlToText(html) : "";
+    } else {
+      const plain = pasteEl.value;
+      if (!plain) { outputEl.value = ""; return; }
+      const asHtml = markdownToHtml(plain);
+      outputEl.value = asHtml ? htmlToText(asHtml) : plain.trim();
+    }
   }
 
   function renderRich() {
@@ -927,8 +1023,12 @@
 
   function applyLayout() {
     const rich = isRich();
-    pasteEl.classList.toggle("hidden", rich);
+    const md   = isMarkdown();
+    // Left pane visibility
+    pasteRichEl.classList.toggle("hidden", !md);
+    pasteEl.classList.toggle("hidden", rich || md);
     mdInput.classList.toggle("hidden", !rich);
+    // Right pane visibility
     outputEl.classList.toggle("hidden", rich);
     previewEl.classList.toggle("hidden", !rich);
     copyLabel.textContent = rich ? "Copy Rich Text" : "Copy";
@@ -937,9 +1037,13 @@
       outLabel.textContent = "Rich text preview";
       subEl.innerHTML = 'Type or paste <strong>Markdown</strong> on the left. Copy the rendered rich text with the button — or select it and press <kbd>&#8984;C</kbd> / <kbd>Ctrl+C</kbd>.';
       renderRich();
+    } else if (md) {
+      leftLabel.textContent = "Paste here";
+      subEl.innerHTML = 'Paste rich text on the left (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>) to convert to Markdown.';
+      render();
     } else {
       leftLabel.textContent = "Paste here";
-      subEl.innerHTML = 'Copy rich text anywhere, then paste it below (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>). Pick an output flavor.';
+      subEl.innerHTML = 'Paste or type plain text / Markdown on the left (<kbd>&#8984;V</kbd> / <kbd>Ctrl+V</kbd>). Pick an output flavor.';
       render();
     }
   }
@@ -947,38 +1051,53 @@
   tabs.addEventListener("click", e => {
     const btn = e.target.closest(".tab");
     if (!btn) return;
+    saveInput();           // save current tab's input before leaving
     mode = btn.dataset.mode;
     document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === btn));
+    restoreInput();        // load the new tab's saved input
     applyLayout();
     setStatus(isRich()
       ? "Mode: Markdown → Rich Text."
       : `Mode: ${FLAVORS[mode].label.replace(" output", "")}.`);
-    (isRich() ? mdInput : pasteEl).focus();
+    (isRich() ? mdInput : isMarkdown() ? pasteRichEl : pasteEl).focus();
   });
 
+  // Markdown tab: rich-text paste into the contenteditable div.
+  pasteRichEl.addEventListener("paste", e => {
+    e.preventDefault();
+    const cd = e.clipboardData || window.clipboardData;
+    const html  = cd.getData("text/html") || "";
+    const plain = cd.getData("text/plain") || "";
+    pasteRichEl.innerHTML = html || plain.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>");
+    pasteRichEl.classList.toggle("empty", !pasteRichEl.textContent.trim());
+    tabState[mode] = pasteRichEl.innerHTML;
+    render();
+    setStatus(html ? "Converted from rich text." : "Converted from plain text.");
+  });
+  pasteRichEl.addEventListener("input", () => {
+    pasteRichEl.classList.toggle("empty", !pasteRichEl.textContent.trim());
+    tabState[mode] = pasteRichEl.innerHTML;
+    render();
+  });
+
+  // Jira / Slack tabs: plain-text only paste into the textarea.
   pasteEl.addEventListener("paste", e => {
     e.preventDefault();
     const cd = e.clipboardData || window.clipboardData;
-    lastHtml = cd.getData("text/html") || "";
-    lastPlain = cd.getData("text/plain") || "";
-
-    // Show a readable preview in the paste pane.
-    if (lastHtml) {
-      pasteEl.innerHTML = lastHtml;
-    } else {
-      pasteEl.textContent = lastPlain;
-    }
-    pasteEl.classList.toggle("empty", !pasteEl.textContent.trim());
-
+    const text = cd.getData("text/plain") || "";
+    // Insert at cursor position (handles partial selections too).
+    const start = pasteEl.selectionStart;
+    const end = pasteEl.selectionEnd;
+    const current = pasteEl.value;
+    pasteEl.value = current.slice(0, start) + text + current.slice(end);
+    pasteEl.selectionStart = pasteEl.selectionEnd = start + text.length;
+    tabState[mode] = pasteEl.value;
     render();
-    setStatus(lastHtml ? "Converted from rich text (HTML)." : "Converted from plain text.");
+    setStatus("Converted from plain text.");
   });
 
-  // If the user edits the paste pane manually, re-read it as HTML.
   pasteEl.addEventListener("input", () => {
-    lastHtml = pasteEl.innerHTML;
-    lastPlain = pasteEl.textContent;
-    pasteEl.classList.toggle("empty", !pasteEl.textContent.trim());
+    tabState[mode] = pasteEl.value;
     render();
   });
 
@@ -993,13 +1112,16 @@
       mdInput.focus();
       return;
     }
-    lastHtml = "";
-    lastPlain = "";
-    pasteEl.innerHTML = "";
-    pasteEl.classList.add("empty");
+    tabState[mode] = "";
+    if (isMarkdown()) {
+      pasteRichEl.innerHTML = "";
+      pasteRichEl.classList.add("empty");
+    } else {
+      pasteEl.value = "";
+    }
     outputEl.value = "";
     setStatus("Cleared.");
-    pasteEl.focus();
+    (isMarkdown() ? pasteRichEl : pasteEl).focus();
   });
 
   function flashCopied(msg) {
