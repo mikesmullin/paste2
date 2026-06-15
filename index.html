@@ -660,12 +660,11 @@
         }).join("\n");
       }
 
-      // 3+ columns: same approach — bold header row, pipe-separated.
-      return rows.map((r, ri) => {
-        const rowIsHeader = r.some(c => c.header) || ri === 0;
+      // 3+ columns: `| cell | cell | cell |` every row, inline mrkdwn preserved.
+      // Skip the separator row (all dashes) — it's not needed in Slack.
+      return rows.map(r => {
         const cells = r.map(c => c.text || " ");
-        if (rowIsHeader) return cells.map(t => `*${t}*`).join("  |  ");
-        return cells.join("  |  ");
+        return "| " + cells.join(" | ") + " |";
       }).join("\n");
     }
 
