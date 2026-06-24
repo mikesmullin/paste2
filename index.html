@@ -376,8 +376,11 @@
       codeInline: t => "`" + t + "`",
       codeBlock: (t) => "```\n" + t + "\n```",
       heading: (t) => `*${t}*`, // Slack mrkdwn has no headings → bold
-      link: (text, href) => (!text || text === href) ? `<${href}>` : `<${href}|${text}>`,
-      image: (alt, src) => `<${src}|${alt || src}>`,
+      // Slack's <href|text> syntax only renders via the API, not when typed/pasted
+      // into the client composer. The client only auto-links Markdown-style links,
+      // so keep [text](href) for direct paste.
+      link: (text, href) => (!text || text === href) ? href : `[${text}](${href})`,
+      image: (alt, src) => (!alt || alt === src) ? src : `[${alt}](${src})`,
       bulletMarker: () => "• ",
       orderedMarker: (i) => `${i}. `,
       indent: (depth) => "    ".repeat(depth),
